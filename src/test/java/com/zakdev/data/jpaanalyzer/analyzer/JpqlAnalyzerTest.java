@@ -59,6 +59,15 @@ class JpqlAnalyzerTest {
     }
 
     @Test
+    @DisplayName("flags NOT IN (subquery) for its NULL pitfall")
+    void notInSubquery() {
+        assertTrue(jpqlRules("SELECT a FROM Author a WHERE a.id NOT IN (SELECT b.authorId FROM Book b)")
+                .contains("NOT_IN_SUBQUERY"));
+        assertFalse(jpqlRules("SELECT a FROM Author a WHERE a.id IN (SELECT b.authorId FROM Book b)")
+                .contains("NOT_IN_SUBQUERY"));
+    }
+
+    @Test
     @DisplayName("flags ORDER BY over an unbounded result")
     void orderByUnbounded() {
         assertTrue(jpqlRules("SELECT a FROM Author a ORDER BY a.name")

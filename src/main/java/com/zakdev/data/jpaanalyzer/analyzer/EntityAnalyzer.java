@@ -17,6 +17,8 @@ public class EntityAnalyzer {
 
     public void analyze(ClassOrInterfaceDeclaration classDecl, EntityInfo entityInfo) {
         checkFetchTypes(classDecl, entityInfo);
+        checkDefaultEagerToOne(classDecl, entityInfo);
+        checkOneToOneMapsId(classDecl, entityInfo);
         checkLombokOnEntity(classDecl, entityInfo);
         checkMissingVersionField(classDecl, entityInfo);
         checkIdGeneratorStrategy(classDecl, entityInfo);
@@ -75,6 +77,60 @@ public class EntityAnalyzer {
                 }
             }
         });
+    }
+
+    /**
+     * @ManyToOne and @OneToOne default to FetchType.EAGER when no fetch is given. This is the
+     * single most common JPA performance bug (HO's headline mapping event): every parent read
+     * silently drags the association along with an extra select. Explicit EAGER is handled by
+     * {@link #checkFetchTypes}; this catches the far more common implicit case.
+     */
+    private void checkDefaultEagerToOne(ClassOrInterfaceDeclaration classDecl, EntityInfo entityInfo) {
+        classDecl.getFields().forEach(field -> {
+            String fieldName = field.getVariables().isEmpty()
+                    ? "?" : field.getVariables().get(0).getNameAsString();
+            checkDefaultEager(field, fieldName, "ManyToOne", entityInfo);
+            checkDefaultEager(field, fieldName, "OneToOne", entityInfo);
+        });
+    }
+
+    private void checkDefaultEager(FieldDeclaration field, String fieldName,
+                                   String annotationName, EntityInfo entityInfo) {
+        field.getAnnotationByName(annotationName).ifPresent(ann -> {
+            // No fetch attribute at all -> the JPA default of EAGER applies.
+            if (annotationPairValue(ann, "fetch") == null) {
+                entityInfo.addIssue(new Issue(
+                    IssueSeverity.WARNING,
+                    "DEFAULT_EAGER_TO_ONE",
+                    "@" + annotationName + " on '" + fieldName + "' has no fetch type, so it defaults to EAGER and "
+                            + "is loaded with an extra select on every parent read (N+1).",
+                    "Set fetch = FetchType.LAZY explicitly and pull the association with JOIN FETCH or an entity graph where needed."
+                ));
+            }
+        });
+    }
+
+    /**
+     * An owning @OneToOne (no mappedBy) without @MapsId stores a separate FK column and cannot be
+     * loaded lazily reliably, so Hibernate eagerly fires a secondary select. Sharing the parent's
+     * PK via @MapsId removes both the column and the extra select (per Vlad Mihalcea).
+     */
+    private void checkOneToOneMapsId(ClassOrInterfaceDeclaration classDecl, EntityInfo entityInfo) {
+        classDecl.getFields().forEach(field -> field.getAnnotationByName("OneToOne").ifPresent(ann -> {
+            boolean inverseSide = annotationPairValue(ann, "mappedBy") != null;
+            boolean hasMapsId = field.getAnnotationByName("MapsId").isPresent();
+            if (!inverseSide && !hasMapsId) {
+                String fieldName = field.getVariables().isEmpty()
+                        ? "?" : field.getVariables().get(0).getNameAsString();
+                entityInfo.addIssue(new Issue(
+                    IssueSeverity.WARNING,
+                    "ONE_TO_ONE_NO_MAPSID",
+                    "Owning @OneToOne on '" + fieldName + "' without @MapsId uses a separate FK column and can't be "
+                            + "loaded lazily, so it behaves like an eager secondary select.",
+                    "Add @MapsId so the child shares the parent's primary key, removing the extra column and the eager select."
+                ));
+            }
+        }));
     }
 
     private void checkLombokOnEntity(ClassOrInterfaceDeclaration classDecl, EntityInfo entityInfo) {

@@ -29,6 +29,7 @@ public class JpqlAnalyzer {
         checkCartesianProduct(qi, upper);
         checkInClause(qi, upper);
         checkInSubquery(qi, upper);
+        checkNotInSubquery(qi, upper);
         checkOrderByOnUnbounded(qi, upper);
         checkLikeLeadingWildcard(qi, upper);
         checkFunctionOnWhereColumn(qi, upper);
@@ -149,6 +150,19 @@ public class JpqlAnalyzer {
                 "IN_SUBQUERY",
                 "IN (subquery) often forces the database to materialize the inner result before filtering.",
                 "Prefer EXISTS (correlated) or an explicit JOIN, which usually plan and short-circuit better."
+            ));
+        }
+    }
+
+    private void checkNotInSubquery(QueryInfo qi, String upper) {
+        // NOT IN (subquery) yields NO rows if the subquery returns a single NULL (three-valued
+        // logic), and it cannot short-circuit the way NOT EXISTS does.
+        if (upper.contains("NOT IN (SELECT") || upper.contains("NOT IN(SELECT")) {
+            qi.addIssue(new Issue(
+                IssueSeverity.WARNING,
+                "NOT_IN_SUBQUERY",
+                "NOT IN (subquery) returns no rows at all if the subquery yields a single NULL, and it can't short-circuit like NOT EXISTS.",
+                "Use NOT EXISTS (correlated) or a LEFT JOIN ... WHERE x IS NULL, which handle NULLs correctly and usually plan better."
             ));
         }
     }
