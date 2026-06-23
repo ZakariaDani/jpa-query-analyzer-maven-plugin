@@ -49,6 +49,20 @@ class SpringDataMethodAnalyzerTest {
     }
 
     @Test
+    @DisplayName("flags a Stream<> return for the open-cursor resource risk")
+    void streamReturn() {
+        assertTrue(derivedRules("findByStatus", "Stream<A>", false).contains("STREAM_QUERY_RESOURCE"));
+        assertFalse(derivedRules("findByStatus", "List<A>", false).contains("STREAM_QUERY_RESOURCE"));
+    }
+
+    @Test
+    @DisplayName("flags a Containing keyword as a leading-wildcard LIKE")
+    void derivedLikeContains() {
+        assertTrue(derivedRules("findByNameContaining", "List<A>", true).contains("DERIVED_LIKE_CONTAINS"));
+        assertFalse(derivedRules("findByNameStartingWith", "List<A>", true).contains("DERIVED_LIKE_CONTAINS"));
+    }
+
+    @Test
     @DisplayName("a simple findById raises nothing")
     void cleanDerivedMethodIsSilent() {
         assertTrue(derivedRules("findById", "Optional<A>", false).isEmpty());

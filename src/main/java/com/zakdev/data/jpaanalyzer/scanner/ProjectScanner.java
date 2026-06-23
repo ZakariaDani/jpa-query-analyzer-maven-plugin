@@ -11,9 +11,11 @@ import com.github.javaparser.ast.expr.SingleMemberAnnotationExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
 import com.github.javaparser.ast.expr.TextBlockLiteralExpr;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
+import com.zakdev.data.jpaanalyzer.analyzer.ConfigAnalyzer;
 import com.zakdev.data.jpaanalyzer.analyzer.EntityAnalyzer;
 import com.zakdev.data.jpaanalyzer.analyzer.JpqlAnalyzer;
 import com.zakdev.data.jpaanalyzer.analyzer.SpringDataMethodAnalyzer;
+import com.zakdev.data.jpaanalyzer.model.ConfigInfo;
 import com.zakdev.data.jpaanalyzer.model.EntityInfo;
 import com.zakdev.data.jpaanalyzer.model.QueryInfo;
 import com.zakdev.data.jpaanalyzer.model.QueryType;
@@ -21,6 +23,7 @@ import com.zakdev.data.jpaanalyzer.model.ScanReport;
 
 import java.io.File;
 import java.nio.file.Files;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -41,13 +44,16 @@ public class ProjectScanner {
     private final JpqlAnalyzer jpqlAnalyzer;
     private final EntityAnalyzer entityAnalyzer;
     private final SpringDataMethodAnalyzer derivedAnalyzer;
+    private final ConfigAnalyzer configAnalyzer;
 
     public ProjectScanner(JpqlAnalyzer jpqlAnalyzer,
                           EntityAnalyzer entityAnalyzer,
-                          SpringDataMethodAnalyzer derivedAnalyzer) {
+                          SpringDataMethodAnalyzer derivedAnalyzer,
+                          ConfigAnalyzer configAnalyzer) {
         this.jpqlAnalyzer = jpqlAnalyzer;
         this.entityAnalyzer = entityAnalyzer;
         this.derivedAnalyzer = derivedAnalyzer;
+        this.configAnalyzer = configAnalyzer;
     }
 
     public ScanReport scan(File sourceDirectory) {
@@ -61,6 +67,19 @@ public class ProjectScanner {
             System.err.println("[JPA Analyzer] Scan error: " + e.getMessage());
         }
         return report;
+    }
+
+    /**
+     * Loads and analyzes the project's merged Spring/Hibernate configuration from
+     * a resources directory, appending a single {@link ConfigInfo} to the report
+     * when any config files are found.
+     */
+    public void scanConfig(File resourcesDirectory, ScanReport report) {
+        Map<String, String> props = ConfigLoader.load(resourcesDirectory);
+        if (props.isEmpty()) return;
+        ConfigInfo ci = new ConfigInfo("application config");
+        configAnalyzer.analyze(props, ci);
+        report.addConfig(ci);
     }
 
     private void processFile(File file, File baseDir, ScanReport report) {

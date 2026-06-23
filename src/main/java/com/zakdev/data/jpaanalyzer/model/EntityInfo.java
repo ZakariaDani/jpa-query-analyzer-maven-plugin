@@ -15,6 +15,7 @@ public class EntityInfo {
     }
 
     public void addIssue(Issue issue) { issues.add(issue); }
+    public void removeIssues(java.util.function.Predicate<Issue> p) { issues.removeIf(p); }
     public boolean hasIssues() { return !issues.isEmpty(); }
 
     public String getSourceFile() { return sourceFile; }

@@ -1,5 +1,6 @@
 package com.zakdev.data.jpaanalyzer.reporter;
 
+import com.zakdev.data.jpaanalyzer.model.ConfigInfo;
 import com.zakdev.data.jpaanalyzer.model.EntityInfo;
 import com.zakdev.data.jpaanalyzer.model.Issue;
 import com.zakdev.data.jpaanalyzer.model.IssueSeverity;
@@ -90,7 +91,8 @@ public class TerminalReporter {
 
     private void section(String title, String col, ScanReport r, IssueSeverity sev) {
         boolean any = r.getQueries().stream().anyMatch(q -> q.countBySeverity(sev) > 0)
-                   || r.getEntities().stream().anyMatch(e -> e.countBySeverity(sev) > 0);
+                   || r.getEntities().stream().anyMatch(e -> e.countBySeverity(sev) > 0)
+                   || r.getConfigs().stream().anyMatch(c -> c.countBySeverity(sev) > 0);
         if (!any) return;
 
         p(col + bar('=', WIDTH) + RESET);
@@ -98,6 +100,13 @@ public class TerminalReporter {
         p(col + bar('=', WIDTH) + RESET);
         p("");
 
+        for (ConfigInfo cfg : r.getConfigs()) {
+            List<Issue> matching = cfg.getIssues().stream().filter(i -> i.getSeverity() == sev).toList();
+            if (matching.isEmpty()) continue;
+            p(BOLD + "  [CONFIG] " + cfg.getSourceFile() + RESET);
+            p(DIM + "  " + bar('-', WIDTH - 2) + RESET);
+            matching.forEach(this::issue);
+        }
         for (EntityInfo e : r.getEntities()) {
             List<Issue> matching = e.getIssues().stream().filter(i -> i.getSeverity() == sev).toList();
             if (matching.isEmpty()) continue;
@@ -160,6 +169,9 @@ public class TerminalReporter {
         });
         r.getEntities().forEach(e -> {
             if (!e.getIssues().isEmpty()) byFile.merge(e.getSourceFile(), (long) e.getIssues().size(), Long::sum);
+        });
+        r.getConfigs().forEach(c -> {
+            if (!c.getIssues().isEmpty()) byFile.merge(c.getSourceFile(), (long) c.getIssues().size(), Long::sum);
         });
 
         p(BOLD + "  Most problematic files" + RESET);

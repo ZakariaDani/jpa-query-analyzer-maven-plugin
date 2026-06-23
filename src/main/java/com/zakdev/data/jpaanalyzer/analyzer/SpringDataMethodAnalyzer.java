@@ -26,6 +26,8 @@ public class SpringDataMethodAnalyzer {
         checkComplexDerivedMethod(qi, method, lower);
         checkDerivedDeleteLoadsEntities(qi, lower);
         checkTopWithoutOrderBy(qi, lower);
+        checkStreamReturn(qi, returnType);
+        checkDerivedLikeContains(qi, lower);
     }
 
     private void checkFindAllNoPagination(QueryInfo qi, String lower) {
@@ -87,6 +89,32 @@ public class SpringDataMethodAnalyzer {
                 "TOP_WITHOUT_ORDERBY",
                 "First/Top query '" + qi.getMethodName() + "' has no OrderBy - the row returned is non-deterministic.",
                 "Add an explicit OrderBy... clause (or a Sort) so the limited result is stable."
+            ));
+        }
+    }
+
+    private void checkStreamReturn(QueryInfo qi, String returnType) {
+        // A Stream<> query holds a DB cursor/connection open until the stream is closed.
+        if (returnType.startsWith("Stream<")) {
+            qi.addIssue(new Issue(
+                IssueSeverity.INFO,
+                "STREAM_QUERY_RESOURCE",
+                "A Stream<> query method keeps a database cursor and connection open until the stream is closed; "
+                        + "leaking it exhausts the connection pool.",
+                "Consume it inside a @Transactional method and a try-with-resources block, or return a List/Page instead."
+            ));
+        }
+    }
+
+    private void checkDerivedLikeContains(QueryInfo qi, String lower) {
+        // The Containing/Contains keyword generates LIKE '%term%' - a leading wildcard.
+        if (lower.contains("containing") || lower.contains("contains")) {
+            qi.addIssue(new Issue(
+                IssueSeverity.WARNING,
+                "DERIVED_LIKE_CONTAINS",
+                "A 'Containing' keyword in '" + qi.getMethodName() + "' generates LIKE '%term%' with a leading "
+                        + "wildcard, which cannot use a B-tree index.",
+                "Use StartingWith ('term%') if a prefix search suffices, or a full-text/trigram index for contains-search."
             ));
         }
     }

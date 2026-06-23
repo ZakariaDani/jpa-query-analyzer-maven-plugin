@@ -2,12 +2,14 @@ package com.zakdev.data.jpaanalyzer.analyzer;
 
 import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.zakdev.data.jpaanalyzer.model.ConfigInfo;
 import com.zakdev.data.jpaanalyzer.model.EntityInfo;
 import com.zakdev.data.jpaanalyzer.model.Issue;
 import com.zakdev.data.jpaanalyzer.model.QueryInfo;
 import com.zakdev.data.jpaanalyzer.model.QueryType;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -41,6 +43,12 @@ final class TestSupport {
                 QueryType.SPRING_DATA_DERIVED, 1, hasPagination, returnType);
         new SpringDataMethodAnalyzer().analyze(qi);
         return ruleIds(qi.getIssues());
+    }
+
+    static Set<String> configRules(Map<String, String> props) {
+        ConfigInfo ci = new ConfigInfo("application config");
+        new ConfigAnalyzer().analyze(props, ci);
+        return ruleIds(ci.getIssues());
     }
 
     static Set<String> entityRules(String classSource) {

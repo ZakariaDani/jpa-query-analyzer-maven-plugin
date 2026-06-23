@@ -25,6 +25,28 @@ class EntityAnalyzerTest {
     }
 
     @Test
+    @DisplayName("flags the implicit default EAGER on @ManyToOne/@OneToOne, but not when LAZY")
+    void defaultEagerToOne() {
+        assertTrue(entityRules("@Entity class A { @ManyToOne private B b; }")
+                .contains("DEFAULT_EAGER_TO_ONE"));
+        assertTrue(entityRules("@Entity class A { @OneToOne private B b; }")
+                .contains("DEFAULT_EAGER_TO_ONE"));
+        assertFalse(entityRules("@Entity class A { @ManyToOne(fetch = FetchType.LAZY) private B b; }")
+                .contains("DEFAULT_EAGER_TO_ONE"));
+    }
+
+    @Test
+    @DisplayName("flags an owning @OneToOne without @MapsId, but not with @MapsId or on the inverse side")
+    void oneToOneMapsId() {
+        assertTrue(entityRules("@Entity class A { @OneToOne private B b; }")
+                .contains("ONE_TO_ONE_NO_MAPSID"));
+        assertFalse(entityRules("@Entity class A { @OneToOne @MapsId private B b; }")
+                .contains("ONE_TO_ONE_NO_MAPSID"));
+        assertFalse(entityRules("@Entity class A { @OneToOne(mappedBy = \"a\") private B b; }")
+                .contains("ONE_TO_ONE_NO_MAPSID"));
+    }
+
+    @Test
     @DisplayName("flags @GeneratedValue(IDENTITY) for breaking insert batching")
     void identityGenerator() {
         assertTrue(entityRules("@Entity class A { @Id @GeneratedValue(strategy = GenerationType.IDENTITY) private Long id; }")

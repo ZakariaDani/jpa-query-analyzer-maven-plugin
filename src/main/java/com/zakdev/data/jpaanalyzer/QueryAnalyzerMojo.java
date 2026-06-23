@@ -1,9 +1,13 @@
 package com.zakdev.data.jpaanalyzer;
 
+import com.zakdev.data.jpaanalyzer.analyzer.ConfigAnalyzer;
 import com.zakdev.data.jpaanalyzer.analyzer.EntityAnalyzer;
 import com.zakdev.data.jpaanalyzer.analyzer.JpqlAnalyzer;
 import com.zakdev.data.jpaanalyzer.analyzer.SpringDataMethodAnalyzer;
 import com.zakdev.data.jpaanalyzer.model.ScanReport;
+import com.zakdev.data.jpaanalyzer.reporter.Baseline;
+import com.zakdev.data.jpaanalyzer.reporter.JsonReporter;
+import com.zakdev.data.jpaanalyzer.reporter.SarifReporter;
 import com.zakdev.data.jpaanalyzer.reporter.TerminalReporter;
 import com.zakdev.data.jpaanalyzer.scanner.ProjectScanner;
 import org.apache.maven.plugin.AbstractMojo;
@@ -13,6 +17,9 @@ import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 /**
  * Static-analyzes JPA queries in a Spring Boot project and prints a
@@ -25,6 +32,10 @@ public class QueryAnalyzerMojo extends AbstractMojo {
 
     @Parameter(defaultValue = "${project.build.sourceDirectory}", required = true, readonly = true)
     private File sourceDirectory;
+
+    /** Resources directory scanned for application.properties / application.yml. */
+    @Parameter(defaultValue = "${project.basedir}/src/main/resources", readonly = true)
+    private File resourcesDirectory;
 
     /** Fail the build if any CRITICAL issue is found. */
     @Parameter(property = "jpa.analyzer.failOnCritical", defaultValue = "false")
@@ -42,6 +53,22 @@ public class QueryAnalyzerMojo extends AbstractMojo {
     @Parameter(property = "jpa.analyzer.skip", defaultValue = "false")
     private boolean skip;
 
+    /** Output format: {@code terminal} (default), {@code json}, or {@code sarif}. */
+    @Parameter(property = "jpa.analyzer.format", defaultValue = "terminal")
+    private String format;
+
+    /** Where to write json/sarif output. When unset, the report is printed to stdout. */
+    @Parameter(property = "jpa.analyzer.outputFile")
+    private File outputFile;
+
+    /** Baseline file of accepted issues; matching findings are suppressed so CI fails only on new ones. */
+    @Parameter(property = "jpa.analyzer.baseline")
+    private File baseline;
+
+    /** Regenerate the baseline file from the current findings and do not fail the build. */
+    @Parameter(property = "jpa.analyzer.writeBaseline", defaultValue = "false")
+    private boolean writeBaseline;
+
     @Override
     public void execute() throws MojoFailureException {
         if (skip) {
@@ -52,17 +79,33 @@ public class QueryAnalyzerMojo extends AbstractMojo {
         getLog().info("Analyzing JPA queries in: " + sourceDirectory);
 
         ProjectScanner scanner = new ProjectScanner(
-                new JpqlAnalyzer(), new EntityAnalyzer(), new SpringDataMethodAnalyzer());
+                new JpqlAnalyzer(), new EntityAnalyzer(), new SpringDataMethodAnalyzer(),
+                new ConfigAnalyzer());
         ScanReport report = scanner.scan(sourceDirectory);
+        scanner.scanConfig(resourcesDirectory, report);
 
-        boolean useColor = !noColor
-                && System.getenv("NO_COLOR") == null
-                && System.console() != null;
-        // Even without a console (CI), keep colour unless explicitly disabled,
-        // since Maven output is usually captured by a colour-aware terminal.
-        useColor = !noColor && System.getenv("NO_COLOR") == null;
+        // Regenerate the baseline and stop: snapshot current findings as accepted, never fail.
+        if (writeBaseline) {
+            if (baseline == null) {
+                throw new MojoFailureException("writeBaseline=true requires jpa.analyzer.baseline to be set.");
+            }
+            try {
+                long n = Baseline.size(report);
+                Baseline.write(baseline, report);
+                getLog().info("Wrote baseline with " + n + " fingerprint(s) to " + baseline);
+            } catch (IOException e) {
+                throw new MojoFailureException("Failed to write baseline: " + e.getMessage(), e);
+            }
+            return;
+        }
 
-        new TerminalReporter(useColor).report(report);
+        // Apply an existing baseline so only new issues are reported and can fail the build.
+        if (baseline != null && baseline.exists()) {
+            long suppressed = Baseline.apply(baseline, report);
+            if (suppressed > 0) getLog().info("Suppressed " + suppressed + " baselined issue(s).");
+        }
+
+        render(report);
 
         if (failOnWarning && (report.totalWarnings() > 0 || report.totalCritical() > 0)) {
             throw new MojoFailureException(
@@ -71,6 +114,33 @@ public class QueryAnalyzerMojo extends AbstractMojo {
         if (failOnCritical && report.totalCritical() > 0) {
             throw new MojoFailureException(
                     report.totalCritical() + " critical JPA issue(s) found (failOnCritical).");
+        }
+    }
+
+    private void render(ScanReport report) throws MojoFailureException {
+        switch (format == null ? "terminal" : format.toLowerCase()) {
+            case "json"  -> emit(new JsonReporter().render(report), "JSON");
+            case "sarif" -> emit(new SarifReporter().render(report), "SARIF");
+            default      -> {
+                // Even without a console (CI), keep colour unless explicitly disabled,
+                // since Maven output is usually captured by a colour-aware terminal.
+                boolean useColor = !noColor && System.getenv("NO_COLOR") == null;
+                new TerminalReporter(useColor).report(report);
+            }
+        }
+    }
+
+    private void emit(String content, String label) throws MojoFailureException {
+        if (outputFile == null) {
+            System.out.println(content);
+            return;
+        }
+        try {
+            if (outputFile.getParentFile() != null) outputFile.getParentFile().mkdirs();
+            Files.writeString(outputFile.toPath(), content, StandardCharsets.UTF_8);
+            getLog().info("Wrote " + label + " report to " + outputFile);
+        } catch (IOException e) {
+            throw new MojoFailureException("Failed to write " + label + " report: " + e.getMessage(), e);
         }
     }
 }
