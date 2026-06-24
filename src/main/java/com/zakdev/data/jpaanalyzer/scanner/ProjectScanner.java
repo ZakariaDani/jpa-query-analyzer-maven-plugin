@@ -1,6 +1,5 @@
 package com.zakdev.data.jpaanalyzer.scanner;
 
-import com.github.javaparser.StaticJavaParser;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.expr.AnnotationExpr;
@@ -45,15 +44,18 @@ public class ProjectScanner {
     private final EntityAnalyzer entityAnalyzer;
     private final SpringDataMethodAnalyzer derivedAnalyzer;
     private final ConfigAnalyzer configAnalyzer;
+    private final TypeResolution typeResolution;
 
     public ProjectScanner(JpqlAnalyzer jpqlAnalyzer,
                           EntityAnalyzer entityAnalyzer,
                           SpringDataMethodAnalyzer derivedAnalyzer,
-                          ConfigAnalyzer configAnalyzer) {
+                          ConfigAnalyzer configAnalyzer,
+                          TypeResolution typeResolution) {
         this.jpqlAnalyzer = jpqlAnalyzer;
         this.entityAnalyzer = entityAnalyzer;
         this.derivedAnalyzer = derivedAnalyzer;
         this.configAnalyzer = configAnalyzer;
+        this.typeResolution = typeResolution;
     }
 
     public ScanReport scan(File sourceDirectory) {
@@ -86,7 +88,8 @@ public class ProjectScanner {
         report.incrementScannedFiles();
         String rel = baseDir.toPath().relativize(file.toPath()).toString();
         try {
-            CompilationUnit cu = StaticJavaParser.parse(file);
+            CompilationUnit cu = typeResolution.parse(file).getResult().orElse(null);
+            if (cu == null) return;
             cu.findAll(ClassOrInterfaceDeclaration.class).forEach(decl -> {
                 if (isEntity(decl)) {
                     report.incrementEntityCount();
@@ -111,13 +114,16 @@ public class ProjectScanner {
 
     private boolean isRepository(ClassOrInterfaceDeclaration decl) {
         if (decl.getAnnotationByName("Repository").isPresent()) return true;
+        // Fast path: a direct supertype named like a known Spring Data repository.
         boolean ext = decl.getExtendedTypes().stream()
                 .map(ClassOrInterfaceType::getNameAsString)
                 .anyMatch(REPOSITORY_SUPERTYPES::contains);
         boolean impl = decl.getImplementedTypes().stream()
                 .map(ClassOrInterfaceType::getNameAsString)
                 .anyMatch(REPOSITORY_SUPERTYPES::contains);
-        return ext || impl;
+        if (ext || impl) return true;
+        // Resolved path: catches repositories that reach a supertype through a custom base interface.
+        return typeResolution.isResolvedRepository(decl);
     }
 
     private void extractRepositoryQueries(ClassOrInterfaceDeclaration decl, String rel, ScanReport report) {

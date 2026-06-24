@@ -10,16 +10,21 @@ import com.zakdev.data.jpaanalyzer.reporter.JsonReporter;
 import com.zakdev.data.jpaanalyzer.reporter.SarifReporter;
 import com.zakdev.data.jpaanalyzer.reporter.TerminalReporter;
 import com.zakdev.data.jpaanalyzer.scanner.ProjectScanner;
+import com.zakdev.data.jpaanalyzer.scanner.TypeResolution;
+import org.apache.maven.artifact.DependencyResolutionRequiredException;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
+import org.apache.maven.plugins.annotations.ResolutionScope;
+import org.apache.maven.project.MavenProject;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.List;
 
 /**
  * Static-analyzes JPA queries in a Spring Boot project and prints a
@@ -27,8 +32,12 @@ import java.nio.file.Files;
  *
  *   mvn jpa-analyzer:analyze
  */
-@Mojo(name = "analyze", defaultPhase = LifecyclePhase.VERIFY, requiresProject = true, threadSafe = true)
+@Mojo(name = "analyze", defaultPhase = LifecyclePhase.VERIFY, requiresProject = true, threadSafe = true,
+        requiresDependencyResolution = ResolutionScope.COMPILE)
 public class QueryAnalyzerMojo extends AbstractMojo {
+
+    @Parameter(defaultValue = "${project}", required = true, readonly = true)
+    private MavenProject project;
 
     @Parameter(defaultValue = "${project.build.sourceDirectory}", required = true, readonly = true)
     private File sourceDirectory;
@@ -52,6 +61,14 @@ public class QueryAnalyzerMojo extends AbstractMojo {
     /** Skip analysis entirely. */
     @Parameter(property = "jpa.analyzer.skip", defaultValue = "false")
     private boolean skip;
+
+    /**
+     * Resolve types against the project's classpath so repositories that reach a Spring Data
+     * supertype through a custom base interface are detected. Disable to fall back to name-only
+     * matching (faster, no dependency resolution needed).
+     */
+    @Parameter(property = "jpa.analyzer.resolveTypes", defaultValue = "true")
+    private boolean resolveTypes;
 
     /** Output format: {@code terminal} (default), {@code json}, or {@code sarif}. */
     @Parameter(property = "jpa.analyzer.format", defaultValue = "terminal")
@@ -78,9 +95,12 @@ public class QueryAnalyzerMojo extends AbstractMojo {
 
         getLog().info("Analyzing JPA queries in: " + sourceDirectory);
 
+        TypeResolution typeResolution = buildTypeResolution();
+        getLog().info("Type resolution: " + (typeResolution.solvingEnabled() ? "on" : "off"));
+
         ProjectScanner scanner = new ProjectScanner(
                 new JpqlAnalyzer(), new EntityAnalyzer(), new SpringDataMethodAnalyzer(),
-                new ConfigAnalyzer());
+                new ConfigAnalyzer(), typeResolution);
         ScanReport report = scanner.scan(sourceDirectory);
         scanner.scanConfig(resourcesDirectory, report);
 
@@ -115,6 +135,22 @@ public class QueryAnalyzerMojo extends AbstractMojo {
             throw new MojoFailureException(
                     report.totalCritical() + " critical JPA issue(s) found (failOnCritical).");
         }
+    }
+
+    private TypeResolution buildTypeResolution() {
+        if (!resolveTypes) {
+            return TypeResolution.create(List.of(), List.of(), false);
+        }
+        List<File> sourceRoots = project.getCompileSourceRoots().stream().map(File::new).toList();
+        List<String> classpath;
+        try {
+            classpath = project.getCompileClasspathElements();
+        } catch (DependencyResolutionRequiredException e) {
+            // Without a resolved classpath we can still resolve the project's own sources.
+            getLog().warn("Compile classpath unavailable; type resolution limited to project sources.");
+            classpath = List.of();
+        }
+        return TypeResolution.create(sourceRoots, classpath, true);
     }
 
     private void render(ScanReport report) throws MojoFailureException {
