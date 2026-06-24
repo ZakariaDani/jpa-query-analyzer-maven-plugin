@@ -14,6 +14,8 @@ Highlights:
 - **CI-ready output:** SARIF for GitHub code scanning, JSON for custom tooling, and
   configurable build failure on critical/warning issues.
 - **Baseline support:** adopt it on a legacy codebase and fail only on *new* issues.
+- **Type-aware:** resolves the project classpath, so repositories that extend a custom
+  base interface (not `JpaRepository` directly) are still detected.
 
 ## What it inspects
 
