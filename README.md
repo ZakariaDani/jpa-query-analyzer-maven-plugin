@@ -115,6 +115,7 @@ Bind it to the build so CI fails on regressions:
 | `jpa.analyzer.outputFile` | _(stdout)_ | file to write `json`/`sarif` output to |
 | `jpa.analyzer.baseline` | _(none)_ | baseline file of accepted issues; matches are suppressed |
 | `jpa.analyzer.writeBaseline` | `false` | (re)generate the baseline from current findings, then exit without failing |
+| `jpa.analyzer.resolveTypes` | `true` | resolve types against the project classpath to catch repositories that extend a custom base interface; set `false` for name-only matching |
 
 ```bash
 mvn jpa-analyzer:analyze -Djpa.analyzer.failOnCritical=true
@@ -137,6 +138,15 @@ mvn jpa-analyzer:analyze -Djpa.analyzer.writeBaseline=true -Djpa.analyzer.baseli
 # 2. in CI: suppress baselined issues, fail on anything new
 mvn jpa-analyzer:analyze -Djpa.analyzer.baseline=jpa-baseline.json -Djpa.analyzer.failOnWarning=true
 ```
+
+### Type resolution
+
+By default the plugin resolves types against the project's compile classpath (so the goal
+triggers Maven dependency resolution). This catches repositories that reach a Spring Data
+supertype through a **custom base interface** — e.g. `CustomerRepository extends BaseRepository`
+where `BaseRepository extends JpaRepository` — which plain name matching misses. If resolution
+is slow or undesirable, disable it with `-Djpa.analyzer.resolveTypes=false`; detection then falls
+back to matching direct supertype names.
 
 ## Scope / honest limits
 
